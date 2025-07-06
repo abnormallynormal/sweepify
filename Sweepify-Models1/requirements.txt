@@ -1,0 +1,8 @@
+flask
+torch
+torchvision
+pillow 
+scikit-image 
+requests
+python-dotenv 
+flask-cors

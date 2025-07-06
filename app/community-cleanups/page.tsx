@@ -1,74 +1,41 @@
 "use client"
 
-import { useState } from "react"
-import { Calendar, MapPin, Clock, Search, User } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Calendar, MapPin, Clock, Search, User, Plus, Loader } from "lucide-react"
+import { addDoc, collection, serverTimestamp, getDocs, query, orderBy, where } from "firebase/firestore"
+import { db } from "@/firebase/firebase"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function CommunityCleanupPage() {
   const [activeTab, setActiveTab] = useState("upcoming")
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState("")
+  const [loadingEvents, setLoadingEvents] = useState(true)
+  const [eventsError, setEventsError] = useState<string | null>(null)
+  const { user } = useAuth()
 
-  const upcomingEvents = [
-    {
-      id: 1,
-      title: "Central Park Spring Cleanup",
-      organizer: "Sarah Johnson",
-      date: "2024-03-15",
-      time: "09:00 AM",
-      location: "Central Park, East Side",
-      participants: 23,
-      maxParticipants: 50,
-      description:
-        "Join us for a comprehensive cleanup of Central Park's east side. We'll focus on the playground areas and walking paths.",
-      difficulty: "Easy",
-      duration: "3 hours",
-      supplies: "Provided",
-    },
-    {
-      id: 2,
-      title: "Brooklyn Bridge Walkway Restoration",
-      organizer: "Mike Rodriguez",
-      date: "2024-03-18",
-      time: "08:00 AM",
-      location: "Brooklyn Bridge Pedestrian Walkway",
-      participants: 15,
-      maxParticipants: 30,
-      description: "Help restore the beauty of one of NYC's most iconic landmarks by cleaning the pedestrian walkway.",
-      difficulty: "Medium",
-      duration: "4 hours",
-      supplies: "Bring gloves",
-    },
-    {
-      id: 3,
-      title: "Coney Island Beach Cleanup",
-      organizer: "Emma Liu",
-      date: "2024-03-22",
-      time: "07:00 AM",
-      location: "Coney Island Beach",
-      participants: 42,
-      maxParticipants: 100,
-      description: "Large-scale beach cleanup focusing on plastic waste and debris. Perfect for families and groups.",
-      difficulty: "Easy",
-      duration: "5 hours",
-      supplies: "Provided",
-    },
-  ]
+  // Form state
+  const [eventForm, setEventForm] = useState({
+    title: "",
+    date: "",
+    time: "",
+    location: "",
+    duration: "",
+    difficulty: "",
+    maxParticipants: "",
+    description: "",
+  })
 
-  const myEvents = [
-    {
-      id: 4,
-      title: "Hudson River Trail Cleanup",
-      organizer: "You",
-      date: "2024-03-25",
-      time: "10:00 AM",
-      location: "Hudson River Trail, Mile 3-5",
-      participants: 8,
-      maxParticipants: 25,
-      description: "Cleanup along the scenic Hudson River Trail focusing on litter along the jogging path.",
-      difficulty: "Easy",
-      duration: "2 hours",
-      supplies: "Provided",
-    },
-  ]
+  // Events state
+  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([])
+  const [myEvents, setMyEvents] = useState<any[]>([])
+  const [pastEvents, setPastEvents] = useState<any[]>([])
+  
+  // Filter state
+  const [searchTerm, setSearchTerm] = useState("")
+  const [locationFilter, setLocationFilter] = useState("All Locations")
+  const [difficultyFilter, setDifficultyFilter] = useState("All Difficulties")
 
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
@@ -83,6 +50,192 @@ export default function CommunityCleanupPage() {
     }
   }
 
+  // Check if all form fields are filled
+  const isFormValid = () => {
+    return (
+      eventForm.title.trim() !== "" &&
+      eventForm.date !== "" &&
+      eventForm.time !== "" &&
+      eventForm.location.trim() !== "" &&
+      eventForm.duration !== "" &&
+      eventForm.difficulty !== "" &&
+      eventForm.maxParticipants !== "" &&
+      eventForm.description.trim() !== ""
+    )
+  }
+
+  // Filter events based on current filters
+  const getFilteredEvents = (events: any[]) => {
+    return events.filter(event => {
+      // Search filter
+      const matchesSearch = searchTerm === "" || 
+        event.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        event.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        event.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        event.organizer.toLowerCase().includes(searchTerm.toLowerCase())
+      
+      // Location filter
+      const matchesLocation = locationFilter === "All Locations" || 
+        event.location.toLowerCase().includes(locationFilter.toLowerCase())
+      
+      // Difficulty filter
+      const matchesDifficulty = difficultyFilter === "All Difficulties" || 
+        event.difficulty === difficultyFilter
+      
+      return matchesSearch && matchesLocation && matchesDifficulty
+    })
+  }
+
+  // Handle form input changes
+  const handleFormChange = (field: string, value: string) => {
+    setEventForm(prev => ({ ...prev, [field]: value }))
+    setSubmitError("") // Clear error when user starts typing
+  }
+
+
+
+  // Reset form when modal is closed
+  const handleCloseModal = () => {
+    setShowCreateForm(false)
+    setEventForm({
+      title: "",
+      date: "",
+      time: "",
+      location: "",
+      duration: "",
+      difficulty: "",
+      maxParticipants: "",
+      description: "",
+    })
+    setSubmitError("")
+  }
+
+  // Fetch events from Firestore
+  const fetchEvents = async () => {
+    try {
+      setLoadingEvents(true)
+      setEventsError(null)
+      
+      const eventsRef = collection(db, "events")
+      
+      // Fetch all active events
+      const eventsQuery = query(
+        eventsRef,
+        where("status", "==", "active"),
+        orderBy("createdAt", "desc")
+      )
+      
+      const querySnapshot = await getDocs(eventsQuery)
+      
+      const allEvents: any[] = []
+      querySnapshot.forEach((doc) => {
+        const data = doc.data()
+        allEvents.push({
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate?.() || data.createdAt,
+          updatedAt: data.updatedAt?.toDate?.() || data.updatedAt,
+        })
+      })
+      
+      // Filter and separate events based on date and organizer
+      const now = new Date()
+      
+      // Upcoming events: all future events (regardless of who created them)
+      const upcoming = allEvents.filter(event => {
+        const eventDate = new Date(event.date)
+        return eventDate > now
+      })
+      
+      // My events: only events created by the current user (both past and future)
+      const myEventsList = allEvents.filter(event => event.organizerId === user?.uid)
+      
+      // Past events: events that have already passed (regardless of who created them)
+      const pastEventsList = allEvents.filter(event => {
+        const eventDate = new Date(event.date)
+        return eventDate < now
+      })
+      
+      setUpcomingEvents(upcoming)
+      setMyEvents(myEventsList)
+      setPastEvents(pastEventsList)
+      
+    } catch (err: any) {
+      console.error("Error fetching events:", err)
+      setEventsError("Failed to load events. Please try again.")
+    } finally {
+      setLoadingEvents(false)
+    }
+  }
+
+  // Fetch events on component mount
+  useEffect(() => {
+    fetchEvents()
+  }, [user])
+
+  // Refresh events after creating a new one
+  const handleCreateEvent = async (e: React.FormEvent) => {
+    e.preventDefault()
+    
+    if (!user) {
+      setSubmitError("You must be logged in to create an event")
+      return
+    }
+
+    if (!isFormValid()) {
+      setSubmitError("Please fill in all fields")
+      return
+    }
+
+    setIsSubmitting(true)
+    setSubmitError("")
+
+    try {
+      const eventData = {
+        title: eventForm.title.trim(),
+        organizer: user.email || "Anonymous",
+        organizerId: user.uid,
+        date: eventForm.date,
+        time: eventForm.time,
+        location: eventForm.location.trim(),
+        participants: 0,
+        maxParticipants: parseInt(eventForm.maxParticipants),
+        description: eventForm.description.trim(),
+        difficulty: eventForm.difficulty,
+        duration: eventForm.duration,
+        supplies: "Provided", // Default value
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        status: "active",
+      }
+
+      const docRef = await addDoc(collection(db, "events"), eventData)
+      console.log("Event created successfully with ID:", docRef.id)
+
+      // Reset form and close modal
+      setEventForm({
+        title: "",
+        date: "",
+        time: "",
+        location: "",
+        duration: "",
+        difficulty: "",
+        maxParticipants: "",
+        description: "",
+      })
+      setShowCreateForm(false)
+      
+      // Refresh events instead of reloading page
+      await fetchEvents()
+      
+    } catch (error: any) {
+      console.error("Error creating event:", error)
+      setSubmitError(error.message || "Failed to create event. Please try again.")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-50">
       {/* Header */}
@@ -93,7 +246,7 @@ export default function CommunityCleanupPage() {
           {[
             { id: "upcoming", label: "Upcoming Events", count: upcomingEvents.length },
             { id: "my-events", label: "My Events", count: myEvents.length },
-            { id: "past", label: "Past Events", count: 12 },
+            { id: "past", label: "Past Events", count: pastEvents.length },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -107,33 +260,95 @@ export default function CommunityCleanupPage() {
           ))}
         </div>
 
-        {/* Filters */}
+        {/* Filters and Create Button */}
         <div className="flex flex-col sm:flex-row gap-4 mb-8 animate-slide-up">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-green-400" />
             <input
               type="text"
               placeholder="Search events..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full pl-10 pr-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
             />
           </div>
-          <select className="px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+          <select 
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            className="px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+          >
             <option>All Locations</option>
             <option>Manhattan</option>
             <option>Brooklyn</option>
             <option>Queens</option>
+            <option>Bronx</option>
+            <option>Staten Island</option>
           </select>
-          <select className="px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+          <select 
+            value={difficultyFilter}
+            onChange={(e) => setDifficultyFilter(e.target.value)}
+            className="px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+          >
             <option>All Difficulties</option>
             <option>Easy</option>
             <option>Medium</option>
             <option>Hard</option>
           </select>
+          <button
+            onClick={() => setShowCreateForm(true)}
+            className="flex items-center justify-center space-x-2 px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Create Event</span>
+          </button>
         </div>
 
         {/* Events Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {(activeTab === "upcoming" ? upcomingEvents : myEvents).map((event, index) => (
+        {loadingEvents ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader className="h-8 w-8 animate-spin text-green-600" />
+            <span className="ml-2 text-gray-600">Loading events...</span>
+          </div>
+        ) : eventsError ? (
+          <div className="text-center py-12">
+            <p className="text-red-600 mb-4">{eventsError}</p>
+            <button
+              onClick={fetchEvents}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              Try Again
+            </button>
+          </div>
+        ) : getFilteredEvents(activeTab === "upcoming" ? upcomingEvents : activeTab === "my-events" ? myEvents : pastEvents).length === 0 ? (
+          <div className="text-center py-12">
+            <p className="text-gray-500 text-lg">
+              {activeTab === "upcoming" 
+                ? "No upcoming events found." 
+                : activeTab === "my-events" 
+                ? "You haven't created any events yet."
+                : "No past events found."
+              }
+            </p>
+            <p className="text-gray-400">
+              {activeTab === "upcoming" 
+                ? "Be the first to create an event!" 
+                : activeTab === "my-events" 
+                ? "Create your first cleanup event!"
+                : "Start participating in cleanups to see your history here."
+              }
+            </p>
+            {activeTab === "my-events" && (
+              <button
+                onClick={() => setShowCreateForm(true)}
+                className="mt-4 px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors"
+              >
+                Create Event
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {getFilteredEvents(activeTab === "upcoming" ? upcomingEvents : activeTab === "my-events" ? myEvents : pastEvents).map((event, index) => (
             <div
               key={event.id}
               className="bg-white rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 animate-fade-in"
@@ -206,7 +421,7 @@ export default function CommunityCleanupPage() {
                 </div>
 
                 <div className="flex space-x-3">
-                  {event.organizer === "You" ? (
+                  {event.organizerId === user?.uid ? (
                     <>
                       <button className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors">
                         Manage Event
@@ -230,23 +445,9 @@ export default function CommunityCleanupPage() {
             </div>
           ))}
         </div>
-
-        {/* Empty State */}
-        {activeTab === "past" && (
-          <div className="text-center py-12 animate-fade-in">
-            <div className="inline-flex p-4 bg-green-100 rounded-full mb-4">
-              <Calendar className="h-8 w-8 text-green-600" />
-            </div>
-            <h3 className="text-xl font-bold text-green-800 mb-2">No Past Events Yet</h3>
-            <p className="text-green-600 mb-6">Start participating in cleanups to see your history here.</p>
-            <button
-              onClick={() => setActiveTab("upcoming")}
-              className="px-6 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors"
-            >
-              Browse Upcoming Events
-            </button>
-          </div>
         )}
+
+
       </div>
 
       {/* Create Event Modal */}
@@ -255,18 +456,29 @@ export default function CommunityCleanupPage() {
           <div className="bg-white rounded-2xl p-8 max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-scale-in">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-green-800">Create Cleanup Event</h2>
-              <button onClick={() => setShowCreateForm(false)} className="text-green-400 hover:text-green-600 text-2xl">
+              <button onClick={handleCloseModal} className="text-green-400 hover:text-green-600 text-2xl">
                 ×
               </button>
             </div>
 
-            <form className="space-y-6">
+            {/* Error Message */}
+            {submitError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-red-700 text-sm">{submitError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateEvent} className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-green-700 mb-2">Event Title</label>
                 <input
                   type="text"
-                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  required
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="Enter event title"
+                  value={eventForm.title}
+                  onChange={(e) => handleFormChange("title", e.target.value)}
                 />
               </div>
 
@@ -275,14 +487,22 @@ export default function CommunityCleanupPage() {
                   <label className="block text-sm font-medium text-green-700 mb-2">Date</label>
                   <input
                     type="date"
-                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    required
+                    disabled={isSubmitting}
+                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                    value={eventForm.date}
+                    onChange={(e) => handleFormChange("date", e.target.value)}
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-green-700 mb-2">Time</label>
                   <input
                     type="time"
-                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    required
+                    disabled={isSubmitting}
+                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                    value={eventForm.time}
+                    onChange={(e) => handleFormChange("time", e.target.value)}
                   />
                 </div>
               </div>
@@ -291,36 +511,59 @@ export default function CommunityCleanupPage() {
                 <label className="block text-sm font-medium text-green-700 mb-2">Location</label>
                 <input
                   type="text"
-                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  required
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="Enter cleanup location"
+                  value={eventForm.location}
+                  onChange={(e) => handleFormChange("location", e.target.value)}
                 />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-green-700 mb-2">Duration</label>
-                  <select className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
-                    <option>1 hour</option>
-                    <option>2 hours</option>
-                    <option>3 hours</option>
-                    <option>4 hours</option>
-                    <option>5+ hours</option>
+                  <select 
+                    required
+                    disabled={isSubmitting}
+                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                    value={eventForm.duration}
+                    onChange={(e) => handleFormChange("duration", e.target.value)}
+                  >
+                    <option value="">Select duration</option>
+                    <option value="1 hour">1 hour</option>
+                    <option value="2 hours">2 hours</option>
+                    <option value="3 hours">3 hours</option>
+                    <option value="4 hours">4 hours</option>
+                    <option value="5+ hours">5+ hours</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-green-700 mb-2">Difficulty</label>
-                  <select className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
-                    <option>Easy</option>
-                    <option>Medium</option>
-                    <option>Hard</option>
+                  <select 
+                    required
+                    disabled={isSubmitting}
+                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                    value={eventForm.difficulty}
+                    onChange={(e) => handleFormChange("difficulty", e.target.value)}
+                  >
+                    <option value="">Select difficulty</option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium">Medium</option>
+                    <option value="Hard">Hard</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-green-700 mb-2">Max Participants</label>
                   <input
                     type="number"
-                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    required
+                    disabled={isSubmitting}
+                    className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="50"
+                    min="1"
+                    value={eventForm.maxParticipants}
+                    onChange={(e) => handleFormChange("maxParticipants", e.target.value)}
                   />
                 </div>
               </div>
@@ -329,24 +572,37 @@ export default function CommunityCleanupPage() {
                 <label className="block text-sm font-medium text-green-700 mb-2">Description</label>
                 <textarea
                   rows={4}
-                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                  required
+                  disabled={isSubmitting}
+                  className="w-full px-4 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="Describe your cleanup event..."
+                  value={eventForm.description}
+                  onChange={(e) => handleFormChange("description", e.target.value)}
                 />
               </div>
 
               <div className="flex space-x-4">
                 <button
                   type="button"
-                  onClick={() => setShowCreateForm(false)}
-                  className="flex-1 py-3 border-2 border-green-200 text-green-600 rounded-xl font-medium hover:bg-green-50 transition-colors"
+                  onClick={handleCloseModal}
+                  disabled={isSubmitting}
+                  className="flex-1 py-3 border-2 border-green-200 text-green-600 rounded-xl font-medium hover:bg-green-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors"
+                  disabled={!isFormValid() || isSubmitting}
+                  className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
                 >
-                  Create Event
+                  {isSubmitting ? (
+                    <>
+                      <Loader className="h-4 w-4 animate-spin" />
+                      <span>Creating...</span>
+                    </>
+                  ) : (
+                    <span>Create Event</span>
+                  )}
                 </button>
               </div>
             </form>

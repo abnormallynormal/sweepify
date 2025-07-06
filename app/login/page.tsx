@@ -1,24 +1,75 @@
 "use client"
 
 import type React from "react"
-
+import { signInWithEmailAndPassword } from "firebase/auth"
+import { auth } from "@/firebase/firebase"
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Leaf, Mail, Lock, Eye, EyeOff } from "lucide-react"
+import { Leaf, Mail, Lock, Eye, EyeOff, AlertCircle, CheckCircle } from "lucide-react"
 
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const [formData, setFormData] = useState({
     email: "",
     password: "",
   })
   const router = useRouter()
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // Handle login logic here
-    router.push("/dashboard")
+    setError("")
+    setSuccess("")
+    
+    if (!formData.email || !formData.password) {
+      setError("Please fill in all fields")
+      return
+    }
+    
+    setIsLoading(true)
+    
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, formData.email, formData.password)
+      const user = userCredential.user
+      console.log("Login successful:", user)
+      setSuccess("Login successful! Redirecting...")
+      
+      // Small delay to show success message before redirect
+      setTimeout(() => {
+        router.push("/dashboard")
+      }, 1000)
+    } catch (error: any) {
+      console.error("Login error:", error)
+      const errorCode = error.code
+      let errorMessage = "An error occurred during login"
+      
+      switch (errorCode) {
+        case "auth/user-not-found":
+          errorMessage = "No account found with this email address"
+          break
+        case "auth/wrong-password":
+          errorMessage = "Incorrect password"
+          break
+        case "auth/invalid-email":
+          errorMessage = "Invalid email address"
+          break
+        case "auth/too-many-requests":
+          errorMessage = "Too many failed attempts. Please try again later"
+          break
+        case "auth/user-disabled":
+          errorMessage = "This account has been disabled"
+          break
+        default:
+          errorMessage = error.message || "An error occurred during login"
+      }
+      
+      setError(errorMessage)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -35,6 +86,22 @@ export default function LoginPage() {
         </div>
 
         <div className="glass-effect rounded-2xl p-8 shadow-xl">
+          {/* Error Message */}
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2">
+              <AlertCircle className="h-5 w-5 text-red-500" />
+              <span className="text-red-700 text-sm">{error}</span>
+            </div>
+          )}
+
+          {/* Success Message */}
+          {success && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg flex items-center space-x-2">
+              <CheckCircle className="h-5 w-5 text-green-500" />
+              <span className="text-green-700 text-sm">{success}</span>
+            </div>
+          )}
+
           <form className="space-y-6" onSubmit={handleSubmit}>
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-green-700 mb-2">
@@ -49,7 +116,8 @@ export default function LoginPage() {
                   name="email"
                   type="email"
                   required
-                  className="block w-full pl-10 pr-3 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200 bg-white/70"
+                  disabled={isLoading}
+                  className="block w-full pl-10 pr-3 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200 bg-white/70 disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="Enter your email"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -70,14 +138,16 @@ export default function LoginPage() {
                   name="password"
                   type={showPassword ? "text" : "password"}
                   required
-                  className="block w-full pl-10 pr-12 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200 bg-white/70"
+                  disabled={isLoading}
+                  className="block w-full pl-10 pr-12 py-3 border border-green-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all duration-200 bg-white/70 disabled:opacity-50 disabled:cursor-not-allowed"
                   placeholder="Enter your password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  disabled={isLoading}
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center disabled:opacity-50"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? (
@@ -95,7 +165,8 @@ export default function LoginPage() {
                   id="remember-me"
                   name="remember-me"
                   type="checkbox"
-                  className="h-4 w-4 text-green-600 focus:ring-green-500 border-green-300 rounded"
+                  disabled={isLoading}
+                  className="h-4 w-4 text-green-600 focus:ring-green-500 border-green-300 rounded disabled:opacity-50"
                 />
                 <label htmlFor="remember-me" className="ml-2 block text-sm text-green-700">
                   Remember me
@@ -108,9 +179,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-105"
+              disabled={isLoading}
+              className="w-full flex justify-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-all duration-200 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
-              Sign In
+              {isLoading ? "Signing In..." : "Sign In"}
             </button>
           </form>
 
