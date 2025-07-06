@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { MapPin, Navigation, Users, Loader } from "lucide-react";
 import {
   APIProvider,
@@ -29,7 +30,7 @@ interface CleanupLocation {
   };
   beforePhotoUrl?: string;
   afterPhotoUrl?: string;
-  volunteers?: number;
+  beforeImageIndex?: number;
 }
 
 export default function MapPage() {
@@ -93,7 +94,7 @@ export default function MapPage() {
           },
           beforePhotoUrl: data.beforePhotoUrl || "",
           afterPhotoUrl: data.afterPhotoUrl || "",
-          volunteers: Math.floor(Math.random() * 20) + 1, // Random number for demo
+          beforeImageIndex: data.beforeImageIndex || 0,
         };
         
         // Only add locations with valid coordinates
@@ -286,7 +287,6 @@ export default function MapPage() {
                                 {location.description}
                               </p>
                               <div className="flex items-center justify-between text-xs text-green-500">
-                                <span>{location.volunteers} volunteers</span>
                                 <span>{formatDate(location.createdAt)}</span>
                               </div>
                             </div>
@@ -376,7 +376,8 @@ export default function MapPage() {
                     <img 
                       src={selectedLocation.beforePhotoUrl} 
                       alt="Before cleanup" 
-                      className="w-full h-32 object-cover rounded-lg"
+                      className="w-full max-h-32 object-contain rounded-lg"
+                      style={{ aspectRatio: 'auto' }}
                     />
                     <p className="text-xs text-green-600 mt-1">Before photo</p>
                   </div>
@@ -396,20 +397,21 @@ export default function MapPage() {
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-green-600">Volunteers:</span>
+                    <span className="text-green-600">Dirtiness Index:</span>
                     <span className="font-medium text-green-800">
-                      {selectedLocation.volunteers} interested
+                      {selectedLocation.beforeImageIndex}
                     </span>
                   </div>
                 </div>
 
                 <div className="flex space-x-3">
-                  <button className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors">
-                    Join Cleanup
-                  </button>
-                  <button className="px-4 py-3 border-2 border-green-200 text-green-600 rounded-xl hover:bg-green-50 transition-colors">
-                    <Navigation className="h-4 w-4" />
-                  </button>
+                  <Link 
+                    href={`/upload?tab=complete&locationId=${selectedLocation.id}`}
+                    className="flex-1 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors text-center"
+                  >
+                    Clean up this location
+                  </Link>
+                  
                 </div>
               </div>
             )}
@@ -475,12 +477,7 @@ export default function MapPage() {
                             </div>
                           </div>
                         </div>
-                        <div className="text-right">
-                          <div className="flex items-center text-xs text-green-600">
-                            <Users className="h-3 w-3 mr-1" />
-                            {location.volunteers}
-                          </div>
-                        </div>
+                        
                       </div>
                       <p className="text-sm text-green-700 mb-2 line-clamp-2">
                         {location.description}

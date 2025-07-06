@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Users, CheckCircle, X, Eye, MessageCircle, ThumbsUp, Flag, Search, Loader } from "lucide-react"
-import { collection, getDocs, query, orderBy, limit, doc, updateDoc, where } from "firebase/firestore"
+import { collection, getDocs, query, orderBy, limit, doc, updateDoc, where, getDoc } from "firebase/firestore"
 import { db } from "@/firebase/firebase"
 
 interface CleanupSubmission {
@@ -20,6 +20,7 @@ interface CleanupSubmission {
   points: number;
   verifications: number;
   needsVerification: number;
+  beforeImageIndex?: number;
 }
 
 export default function CommunityPage() {
@@ -28,6 +29,17 @@ export default function CommunityPage() {
   const [pendingSubmissions, setPendingSubmissions] = useState<CleanupSubmission[]>([])
   const [verifiedSubmissions, setVerifiedSubmissions] = useState<CleanupSubmission[]>([])
   const [disputedSubmissions, setDisputedSubmissions] = useState<CleanupSubmission[]>([])
+  
+  // Verification statistics state
+  const [verificationStats, setVerificationStats] = useState({
+    totalVerifications: 0,
+    verifiedCount: 0,
+    disputedCount: 0,
+    accuracyRate: 0,
+    pointsEarned: 0
+  })
+  const [userEmails, setUserEmails] = useState<{ [key: string]: string }>({})
+  
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   
@@ -76,12 +88,19 @@ export default function CommunityPage() {
       
       // Process completed submissions
       const completed: CleanupSubmission[] = []
+      const userIds: string[] = []
+      
       completedSnapshot.forEach((doc) => {
         const data = doc.data()
+        const userId = data.createdBy || "anonymous"
+        if (userId !== "anonymous") {
+          userIds.push(userId)
+        }
+        
         completed.push({
           id: doc.id,
           locationName: data.locationName || "Unknown Location",
-          createdBy: data.createdBy || "Anonymous",
+          createdBy: userId,
           createdAt: data.createdAt,
           beforePhotoUrl: data.beforePhotoUrl || "",
           afterPhotoUrl: data.afterPhotoUrl || "",
@@ -90,9 +109,28 @@ export default function CommunityPage() {
           status: data.status,
           completedAt: data.completedAt,
           completedBy: data.completedBy,
-          points: Math.floor(Math.random() * 50) + 50, // Random points for demo
+          points: (() => {
+            // Use stored pointsEarned field if available
+            if (data.pointsEarned !== undefined && data.pointsEarned !== null) {
+              console.log(`Using stored pointsEarned for ${doc.id}:`, data.pointsEarned);
+              return data.pointsEarned;
+            }
+            // Fallback to stored points field
+            if (data.points !== undefined && data.points !== null) {
+              console.log(`Using stored points for ${doc.id}:`, data.points);
+              return data.points;
+            }
+            // Final fallback: calculate from image indices
+            const beforeIndex = parseFloat(data.beforeImageIndex) || 0;
+            const afterIndex = parseFloat(data.afterImageIndex) || 0;
+            const calculatedPoints = beforeIndex - afterIndex;
+            const finalPoints = isNaN(calculatedPoints) ? 75 : Math.max(0, calculatedPoints);
+            console.log(`Calculated points for ${doc.id}:`, { beforeIndex, afterIndex, calculatedPoints, finalPoints });
+            return finalPoints;
+          })(),
           verifications: 0,
-      needsVerification: 3,
+          needsVerification: 3,
+          beforeImageIndex: data.beforeImageIndex || 0,
         })
       })
       
@@ -100,10 +138,15 @@ export default function CommunityPage() {
       const verified: CleanupSubmission[] = []
       verifiedSnapshot.forEach((doc) => {
         const data = doc.data()
+        const userId = data.createdBy || "anonymous"
+        if (userId !== "anonymous") {
+          userIds.push(userId)
+        }
+        
         verified.push({
           id: doc.id,
           locationName: data.locationName || "Unknown Location",
-          createdBy: data.createdBy || "Anonymous",
+          createdBy: userId,
           createdAt: data.createdAt,
           beforePhotoUrl: data.beforePhotoUrl || "",
           afterPhotoUrl: data.afterPhotoUrl || "",
@@ -112,9 +155,28 @@ export default function CommunityPage() {
           status: data.status,
           completedAt: data.completedAt,
           completedBy: data.completedBy,
-          points: Math.floor(Math.random() * 50) + 50,
+          points: (() => {
+            // Use stored pointsEarned field if available
+            if (data.pointsEarned !== undefined && data.pointsEarned !== null) {
+              console.log(`Using stored pointsEarned for ${doc.id}:`, data.pointsEarned);
+              return data.pointsEarned;
+            }
+            // Fallback to stored points field
+            if (data.points !== undefined && data.points !== null) {
+              console.log(`Using stored points for ${doc.id}:`, data.points);
+              return data.points;
+            }
+            // Final fallback: calculate from image indices
+            const beforeIndex = parseFloat(data.beforeImageIndex) || 0;
+            const afterIndex = parseFloat(data.afterImageIndex) || 0;
+            const calculatedPoints = beforeIndex - afterIndex;
+            const finalPoints = isNaN(calculatedPoints) ? 75 : Math.max(0, calculatedPoints * 100);
+            console.log(`Calculated points for ${doc.id}:`, { beforeIndex, afterIndex, calculatedPoints, finalPoints });
+            return finalPoints;
+          })(),
           verifications: Math.floor(Math.random() * 5) + 1,
-      needsVerification: 3,
+          needsVerification: 3,
+          beforeImageIndex: data.beforeImageIndex || 0,
         })
       })
       
@@ -122,10 +184,15 @@ export default function CommunityPage() {
       const disputed: CleanupSubmission[] = []
       disputedSnapshot.forEach((doc) => {
         const data = doc.data()
+        const userId = data.createdBy || "anonymous"
+        if (userId !== "anonymous") {
+          userIds.push(userId)
+        }
+        
         disputed.push({
           id: doc.id,
           locationName: data.locationName || "Unknown Location",
-          createdBy: data.createdBy || "Anonymous",
+          createdBy: userId,
           createdAt: data.createdAt,
           beforePhotoUrl: data.beforePhotoUrl || "",
           afterPhotoUrl: data.afterPhotoUrl || "",
@@ -134,15 +201,42 @@ export default function CommunityPage() {
           status: data.status,
           completedAt: data.completedAt,
           completedBy: data.completedBy,
-          points: Math.floor(Math.random() * 50) + 50,
-      verifications: 0,
-      needsVerification: 3,
+          points: (() => {
+            // Use stored pointsEarned field if available
+            if (data.pointsEarned !== undefined && data.pointsEarned !== null) {
+              console.log(`Using stored pointsEarned for ${doc.id}:`, data.pointsEarned);
+              return data.pointsEarned;
+            }
+            // Fallback to stored points field
+            if (data.points !== undefined && data.points !== null) {
+              console.log(`Using stored points for ${doc.id}:`, data.points);
+              return data.points;
+            }
+            // Final fallback: calculate from image indices
+            const beforeIndex = parseFloat(data.beforeImageIndex) || 0;
+            const afterIndex = parseFloat(data.afterImageIndex) || 0;
+            const calculatedPoints = beforeIndex - afterIndex;
+            const finalPoints = isNaN(calculatedPoints) ? 75 : Math.max(0, calculatedPoints * 100);
+            console.log(`Calculated points for ${doc.id}:`, { beforeIndex, afterIndex, calculatedPoints, finalPoints });
+            return finalPoints;
+          })(),
+          verifications: 0,
+          needsVerification: 3,
+          beforeImageIndex: data.beforeImageIndex || 0,
         })
       })
       
       setPendingSubmissions(completed)
       setVerifiedSubmissions(verified)
       setDisputedSubmissions(disputed)
+
+      // Calculate verification statistics
+      const stats = calculateVerificationStats(verified, disputed)
+      setVerificationStats(stats)
+
+      // Fetch user emails for all collected user IDs
+      const userEmailsMap = await fetchUserEmails(userIds)
+      setUserEmails(userEmailsMap)
     } catch (err: any) {
       console.error("Error fetching submissions:", err)
       setError("Failed to load submissions. Please try again.")
@@ -154,6 +248,33 @@ export default function CommunityPage() {
   useEffect(() => {
     fetchSubmissions()
   }, [])
+
+  // Function to fetch user emails from the users collection
+  const fetchUserEmails = async (userIds: string[]) => {
+    const uniqueUserIds = [...new Set(userIds.filter(id => id && id !== "anonymous"))]
+    if (uniqueUserIds.length === 0) return {}
+    
+    const userEmailsMap: { [key: string]: string } = {}
+    
+    try {
+      const userDocs = await Promise.all(
+        uniqueUserIds.map(userId => getDoc(doc(db, "users", userId)))
+      )
+      
+      userDocs.forEach((userDoc: any, index: number) => {
+        if (userDoc.exists()) {
+          const userData = userDoc.data()
+          userEmailsMap[uniqueUserIds[index]] = userData.email || "Unknown Email"
+        } else {
+          userEmailsMap[uniqueUserIds[index]] = "Unknown Email"
+        }
+      })
+    } catch (error) {
+      console.error("Error fetching user emails:", error)
+    }
+    
+    return userEmailsMap
+  }
 
   const formatDate = (timestamp: any) => {
     if (!timestamp) return "Unknown date"
@@ -241,6 +362,25 @@ export default function CommunityPage() {
     })
   }
 
+  // Calculate verification statistics
+  const calculateVerificationStats = (verified: CleanupSubmission[], disputed: CleanupSubmission[]) => {
+    const verifiedCount = verified.length
+    const disputedCount = disputed.length
+    const totalVerifications = verifiedCount + disputedCount
+    const accuracyRate = totalVerifications > 0 ? Math.round((verifiedCount / totalVerifications) * 100 * 10) / 10 : 0
+    
+    // Calculate total points earned from verifications
+    const pointsEarned = verified.reduce((total, submission) => total + (submission.points || 0), 0)
+    
+    return {
+      totalVerifications,
+      verifiedCount,
+      disputedCount,
+      accuracyRate,
+      pointsEarned
+    }
+  }
+
   const currentSubmissions = getCurrentSubmissions()
   const filteredSubmissions = getFilteredSubmissions(currentSubmissions)
 
@@ -252,25 +392,25 @@ export default function CommunityPage() {
           <div className="bg-white rounded-2xl p-6 shadow-lg animate-fade-in">
             <div className="flex items-center justify-between mb-2">
               <Eye className="h-8 w-8 text-green-600" />
-              <span className="text-2xl font-bold text-green-800">127</span>
+              <span className="text-2xl font-bold text-green-800">{verificationStats.totalVerifications}</span>
             </div>
             <h3 className="font-semibold text-green-800">Verifications Made</h3>
-            <p className="text-sm text-green-600">This month</p>
+            <p className="text-sm text-green-600">This month ({verificationStats.verifiedCount} verified + {verificationStats.disputedCount} disputed)</p>
           </div>
 
           <div className="bg-white rounded-2xl p-6 shadow-lg animate-fade-in" style={{ animationDelay: "0.1s" }}>
             <div className="flex items-center justify-between mb-2">
               <CheckCircle className="h-8 w-8 text-green-600" />
-              <span className="text-2xl font-bold text-green-800">95%</span>
+              <span className="text-2xl font-bold text-green-800">{verificationStats.accuracyRate}%</span>
             </div>
             <h3 className="font-semibold text-green-800">Accuracy Rate</h3>
-            <p className="text-sm text-green-600">Community trust</p>
+            <p className="text-sm text-green-600">Community trust ({verificationStats.verifiedCount}/{verificationStats.totalVerifications} verified)</p>
           </div>
 
           <div className="bg-white rounded-2xl p-6 shadow-lg animate-fade-in" style={{ animationDelay: "0.2s" }}>
             <div className="flex items-center justify-between mb-2">
               <ThumbsUp className="h-8 w-8 text-green-600" />
-              <span className="text-2xl font-bold text-green-800">340</span>
+              <span className="text-2xl font-bold text-green-800">{verificationStats.pointsEarned}</span>
             </div>
             <h3 className="font-semibold text-green-800">Points Earned</h3>
             <p className="text-sm text-green-600">From verifications</p>
@@ -377,7 +517,7 @@ export default function CommunityPage() {
                 <div className="flex items-start justify-between mb-4">
                   <div>
                       <h3 className="font-bold text-green-800 mb-1">{submission.locationName}</h3>
-                      <p className="text-sm text-green-600">by {submission.createdBy}</p>
+                      <p className="text-sm text-green-600">by {userEmails[submission.createdBy] || submission.createdBy}</p>
                       <p className="text-xs text-green-500">{formatDate(submission.completedAt || submission.createdAt)}</p>
                   </div>
                   <div className="text-right">
@@ -393,7 +533,8 @@ export default function CommunityPage() {
                     <img
                         src={submission.beforePhotoUrl || "/placeholder.svg"}
                       alt="Before cleanup"
-                      className="w-full h-24 object-cover rounded-lg"
+                      className="w-full max-h-24 object-contain rounded-lg"
+                      style={{ aspectRatio: 'auto' }}
                     />
                   </div>
                   <div>
@@ -401,7 +542,8 @@ export default function CommunityPage() {
                     <img
                         src={submission.afterPhotoUrl || "/placeholder.svg"}
                       alt="After cleanup"
-                      className="w-full h-24 object-cover rounded-lg"
+                      className="w-full max-h-24 object-contain rounded-lg"
+                      style={{ aspectRatio: 'auto' }}
                     />
                   </div>
                 </div>
@@ -514,7 +656,8 @@ export default function CommunityPage() {
                   <img
                     src={selectedSubmission.beforePhotoUrl || "/placeholder.svg"}
                     alt="Before cleanup"
-                    className="w-full h-64 object-cover rounded-xl"
+                    className="w-full max-h-64 object-contain rounded-xl"
+                    style={{ aspectRatio: 'auto' }}
                   />
                 </div>
                 <div>
@@ -522,7 +665,8 @@ export default function CommunityPage() {
                   <img
                     src={selectedSubmission.afterPhotoUrl || "/placeholder.svg"}
                     alt="After cleanup"
-                    className="w-full h-64 object-cover rounded-xl"
+                    className="w-full max-h-64 object-contain rounded-xl"
+                    style={{ aspectRatio: 'auto' }}
                   />
                 </div>
               </div>
@@ -538,7 +682,7 @@ export default function CommunityPage() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-green-600">Submitted by:</span>
-                      <span className="font-medium text-green-800">{selectedSubmission.createdBy}</span>
+                      <span className="font-medium text-green-800">{userEmails[selectedSubmission.createdBy] || selectedSubmission.createdBy}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-green-600">Date:</span>
@@ -586,7 +730,7 @@ export default function CommunityPage() {
                     className="flex-1 flex items-center justify-center space-x-2 py-3 bg-green-600 text-white rounded-xl font-medium hover:bg-green-700 transition-colors"
                   >
                     <CheckCircle className="h-5 w-5" />
-                    <span>Approve (+25 pts)</span>
+                    <span>Approve</span>
                   </button>
                   <button
                     onClick={() => handleVerification(selectedSubmission.id, false)}

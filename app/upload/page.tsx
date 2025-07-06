@@ -4,7 +4,8 @@ import type React from "react"
 import { useState, useEffect } from "react"
 import { Camera, Upload, MapPin, CheckCircle, Loader, AlertTriangle, Flag, Target, X } from "lucide-react"
 import Link from "next/link"
-import { addDoc, collection, serverTimestamp, GeoPoint, getDocs, query, orderBy, limit, doc, updateDoc } from "firebase/firestore"
+import { useSearchParams } from "next/navigation"
+import { addDoc, collection, serverTimestamp, GeoPoint, getDocs, query, orderBy, limit, doc, updateDoc, getDoc } from "firebase/firestore"
 import { auth, db } from "@/firebase/firebase"
 import { useAuth } from "@/hooks/use-auth"
 
@@ -28,6 +29,7 @@ interface CleanupLocation {
 }
 
 export default function UploadPage() {
+  const searchParams = useSearchParams()
   const [activeTab, setActiveTab] = useState<TabType>("report")
   const [isProcessing, setIsProcessing] = useState(false)
   const [isVerified, setIsVerified] = useState(false)
@@ -124,6 +126,25 @@ export default function UploadPage() {
       setLoadingLocations(false)
     }
   }
+
+  // Handle URL parameters for pre-selecting tab and location
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    const locationId = searchParams.get('locationId')
+    
+    if (tab === 'complete') {
+      setActiveTab('complete')
+    }
+    
+    if (locationId && activeTab === 'complete') {
+      // Find the location in the cleanup locations and select it
+      const location = cleanupLocations.find(loc => loc.id === locationId)
+      if (location) {
+        setSelectedLocation(location)
+        setCompleteFormData(prev => ({ ...prev, selectedLocationId: location.id }))
+      }
+    }
+  }, [searchParams, activeTab, cleanupLocations])
 
   // Fetch locations when switching to complete tab
   useEffect(() => {
@@ -241,7 +262,7 @@ export default function UploadPage() {
         try {
           const formData = new FormData();
           formData.append("image", file);
-          const res = await fetch("http://127.0.0.1:5000/analyze", {
+          const res = await fetch("https://sweepify.onrender.com/analyze", {
             method: "POST",
             body: formData,
           });
@@ -266,7 +287,7 @@ export default function UploadPage() {
         try {
           const formData = new FormData();
           formData.append("image", file);
-          const res = await fetch("http://127.0.0.1:5000/analyze", {
+          const res = await fetch("https://sweepify.onrender.com/analyze", {
             method: "POST",
             body: formData,
           });
@@ -342,6 +363,7 @@ export default function UploadPage() {
         urgency: reportFormData.urgency,
         type: reportFormData.type,
         locationName: reportFormData.location,
+        beforeImageIndex: aiResult?.score || 0, // Add AI analysis result as number
       }
 
       const docRef = await addDoc(collection(db, "cleanups"), cleanupData)
@@ -367,6 +389,28 @@ export default function UploadPage() {
       // Convert after image to base64 string
       const afterPhotoUrl = await convertImageToBase64(completeFormData.afterImage)
 
+      // Calculate points earned based on improvement (before - after)
+      console.log("Selected location data:", selectedLocation);
+      console.log("After AI result:", afterAiResult);
+      
+      // Fetch the full location data to ensure we have beforeImageIndex
+      const locationDocRef = doc(db, "cleanups", selectedLocation.id);
+      const locationDoc = await getDoc(locationDocRef);
+      const fullLocationData = locationDoc.exists() ? locationDoc.data() : {};
+      
+      const beforeIndex = fullLocationData.beforeImageIndex || (selectedLocation as any).beforeImageIndex || 0;
+      const afterIndex = afterAiResult?.score || 0;
+      const pointsEarned = Math.max(0, beforeIndex - afterIndex); // Ensure non-negative
+      
+      console.log("Points earned calculation:", {
+        selectedLocationId: selectedLocation.id,
+        fullLocationData,
+        beforeIndex,
+        afterIndex,
+        pointsEarned,
+        calculation: `${beforeIndex} - ${afterIndex} = ${beforeIndex - afterIndex}`
+      });
+
       // Update the cleanup document in Firestore
       const cleanupDocRef = doc(db, "cleanups", selectedLocation.id)
       
@@ -376,9 +420,41 @@ export default function UploadPage() {
         completedAt: serverTimestamp(),
         completedBy: user?.uid || "anonymous",
         completionDescription: completeFormData.description || "",
+        afterImageIndex: afterIndex,
+        pointsEarned: pointsEarned, // Add points earned field
       }
 
       await updateDoc(cleanupDocRef, updateData)
+      
+      // Update user's points in the users collection
+      if (user?.uid) {
+        try {
+          const userDocRef = doc(db, "users", user.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            const currentPoints = userData.points || 0;
+            const newPoints = currentPoints + pointsEarned;
+            
+            await updateDoc(userDocRef, {
+              points: newPoints
+            });
+            
+            console.log("User points updated:", {
+              userId: user.uid,
+              previousPoints: currentPoints,
+              pointsEarned: pointsEarned,
+              newTotalPoints: newPoints
+            });
+          } else {
+            console.warn("User document not found for ID:", user.uid);
+          }
+        } catch (userUpdateError) {
+          console.error("Error updating user points:", userUpdateError);
+          // Don't fail the entire submission if user points update fails
+        }
+      }
       
       console.log("Cleanup completed successfully for location:", selectedLocation.id)
       
@@ -602,7 +678,8 @@ export default function UploadPage() {
                       <img
                         src={dirtyImagePreview}
                         alt="Dirty area preview"
-                        className="w-full h-48 object-cover rounded-lg"
+                        className="w-full max-h-64 object-contain rounded-lg"
+                        style={{ aspectRatio: 'auto' }}
                       />
                       <button
                         type="button"
@@ -756,7 +833,8 @@ export default function UploadPage() {
                       <img
                         src={afterImagePreview}
                         alt="After cleanup preview"
-                        className="w-full h-48 object-cover rounded-lg"
+                        className="w-full max-h-64 object-contain rounded-lg"
+                        style={{ aspectRatio: 'auto' }}
                       />
                       <button
                         type="button"
@@ -844,7 +922,7 @@ export default function UploadPage() {
             <p className="text-lg text-green-600 mb-6">
               {activeTab === "report" 
                 ? "Your report has been submitted successfully. Volunteers will be notified!"
-                : "Your cleanup has been successfully verified by our AI system. You've earned 75 points!"
+                : "Your cleanup has been successfully verified by our AI system!"
               }
             </p>
 
@@ -859,10 +937,10 @@ export default function UploadPage() {
                 </div>
                 <div>
                   <p className="text-green-600">
-                    {activeTab === "report" ? "Report Type" : "Points Earned"}
+                    {activeTab === "report" ? "Report Type" : "Location Status"}
                   </p>
                   <p className="font-medium text-green-800">
-                    {activeTab === "report" ? "Dirty Area Report" : "75 points"}
+                    {activeTab === "report" ? "Dirty Area Report" : "Pending Review"}
                   </p>
                 </div>
               </div>
