@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { Camera, Upload, MapPin, CheckCircle, Loader, AlertTriangle, Flag, Target, X } from "lucide-react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
@@ -28,7 +28,7 @@ interface CleanupLocation {
   afterPhotoUrl?: string;
 }
 
-export default function UploadPage() {
+function UploadPageContent() {
   const searchParams = useSearchParams()
   const [activeTab, setActiveTab] = useState<TabType>("report")
   const [isProcessing, setIsProcessing] = useState(false)
@@ -984,5 +984,13 @@ export default function UploadPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function UploadPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <UploadPageContent />
+    </Suspense>
   )
 }
