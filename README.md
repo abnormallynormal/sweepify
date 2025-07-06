@@ -26,7 +26,7 @@ Litter is a visible problem in many urban environments, yet few people feel moti
 🌍 Highlights "hotspots" — areas with frequently reported garbage
 
 🛠️ How We Built It
-Frontend: HTML, CSS, JavaScript (Vanilla + basic animations)
+Frontend: React JS with Typescript and Tailwind CSS
 Backend: Flask + Python
 Database: Firebase (Realtime Database)
 Authentication: Firebase Auth
