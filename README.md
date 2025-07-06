@@ -65,4 +65,3 @@ Google Maps API
 Python
 Typescript
 Tailwind
-
